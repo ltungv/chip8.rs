@@ -5,6 +5,9 @@
 
 use rand::prelude::*;
 
+const CHIP8_WIDTH: usize = 64;
+const CHIP8_HEIGHT: usize = 32;
+
 /// This struct represents the CPU structure of CHIP-8 systems
 pub struct Chip8 {
     /// Index register (0x000-0xFFF)
@@ -30,7 +33,7 @@ pub struct Chip8 {
     /// Graphics system, one instruction is used the draw sprite to the
     /// screen; drawing is done in XOR mode, VF register is set if a
     /// pixel is turned off.
-    gfx: [bool; 2048],
+    gfx: [bool; CHIP8_WIDTH * CHIP8_HEIGHT],
     /// Current state of the HEX-based keypad
     key: [bool; 16],
 }
@@ -46,7 +49,7 @@ impl Default for Chip8 {
             v: [0; 16],
             mem: [0; 4096],
             stack: [0; 16],
-            gfx: [false; 2048],
+            gfx: [false; CHIP8_WIDTH * CHIP8_HEIGHT],
             key: [false; 16],
         }
     }
@@ -55,21 +58,22 @@ impl Default for Chip8 {
 impl Chip8 {
     /// Set the state of the system to the intial state
     pub fn reset(&mut self) {
-        self.i = 0; // reset index register
-        self.pc = 0x200; // pc starts at 0x200 (the beginning of the program)
-        self.sp = 0; // reset stack pointer
-        self.dt = 0; // reset delay timer
-        self.st = 0; // reset hardware timer
+        self.i = 0;
+        self.pc = 0x200; // program begins at 0x200
+        self.sp = 0;
+        self.dt = 0;
+        self.st = 0;
 
-        self.v = [0; 16]; // clear registers
+        self.v = [0; 16];
         self.mem = [0; 4096];
-        self.stack = [0; 16]; // clear memory
+        self.stack = [0; 16];
+        // load font sprites to the first 80 bytes of the memory
         FONTSET
             .iter()
             .enumerate()
             .for_each(|(i, b)| self.mem[i] = *b);
 
-        self.gfx = [false; 2048]; // clear display
+        self.gfx = [false; CHIP8_WIDTH * CHIP8_HEIGHT]; // clear display
         self.key = [false; 16]; // clear display
     }
 
@@ -100,18 +104,18 @@ impl Chip8 {
     }
 
     fn exec(&mut self, opcode: u16) {
-        let opcode_b0 = (opcode & 0xF000) >> 12;
-        let opcode_b1 = (opcode & 0x0F00) >> 8;
-        let opcode_b2 = (opcode & 0x00F0) >> 4;
-        let opcode_b3 = opcode & 0x000F;
+        let opcode_n0 = (opcode & 0xF000) >> 12;
+        let opcode_n1 = (opcode & 0x0F00) >> 8;
+        let opcode_n2 = (opcode & 0x00F0) >> 4;
+        let opcode_n3 = opcode & 0x000F;
 
-        let x = opcode_b1 as usize;
-        let y = opcode_b2 as usize;
+        let x = opcode_n1 as usize;
+        let y = opcode_n2 as usize;
         let n = opcode & 0x000F;
         let kk = (opcode & 0x00FF) as u8;
         let nnn = opcode & 0x0FFF;
 
-        match (opcode_b0, opcode_b1, opcode_b2, opcode_b3) {
+        match (opcode_n0, opcode_n1, opcode_n2, opcode_n3) {
             // 00E0 - CLS
             // Clear the display.
             (0x0, 0x0, 0xE, 0x0) => self.gfx.iter_mut().for_each(|pixel| *pixel = false),
@@ -123,12 +127,6 @@ impl Chip8 {
                 self.pc = self.stack[self.sp as usize];
                 self.sp -= 1;
             }
-
-            // 0NNN - SYS addr
-            // Jump to a machine code routine at nnn.
-            // This instruction is only used on the old computers on which Chip-8 was originally implemented.
-            // It is ignored by modern interpreters.
-            (0x0, _, _, _) => panic!("Not implmented {:X}", opcode),
 
             // 1NNN - JP addr
             // Jump to location nnn.
@@ -273,10 +271,10 @@ impl Chip8 {
                 {
                     for x_offset in 0..8 {
                         if (sprite & (0x80 >> x_offset)) != 0 {
-                            if self.gfx[x + x_offset + (y + y_offset) * 64] {
+                            if self.gfx[x + x_offset + (y + y_offset) * CHIP8_WIDTH] {
                                 self.v[0xF] = 1;
                             }
-                            self.gfx[x + x_offset + (y + y_offset) * 64] ^= true;
+                            self.gfx[x + x_offset + (y + y_offset) * CHIP8_WIDTH] ^= true;
                         }
                     }
                 }
