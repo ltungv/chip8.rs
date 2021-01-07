@@ -5,28 +5,8 @@
 
 use rand::prelude::*;
 
-/// The first four nibble is used to determine what the character,
-const FONTSET: [u8; 80] = [
-    0xF0, 0x90, 0x90, 0x90, 0xF0, // 0
-    0x20, 0x60, 0x20, 0x20, 0x70, // 1
-    0xF0, 0x10, 0xF0, 0x80, 0xF0, // 2
-    0xF0, 0x10, 0xF0, 0x10, 0xF0, // 3
-    0x90, 0x90, 0xF0, 0x10, 0x10, // 4
-    0xF0, 0x80, 0xF0, 0x10, 0xF0, // 5
-    0xF0, 0x80, 0xF0, 0x90, 0xF0, // 6
-    0xF0, 0x10, 0x20, 0x40, 0x40, // 7
-    0xF0, 0x90, 0xF0, 0x90, 0xF0, // 8
-    0xF0, 0x90, 0xF0, 0x10, 0xF0, // 9
-    0xF0, 0x90, 0xF0, 0x90, 0x90, // A
-    0xE0, 0x90, 0xE0, 0x90, 0xE0, // B
-    0xF0, 0x80, 0x80, 0x80, 0xF0, // C
-    0xE0, 0x90, 0x90, 0x90, 0xE0, // D
-    0xF0, 0x80, 0xF0, 0x80, 0xF0, // E
-    0xF0, 0x80, 0xF0, 0x80, 0x80, // F
-];
-
 /// This struct represents the CPU structure of CHIP-8 systems
-pub struct System {
+pub struct Chip8 {
     /// Index register (0x000-0xFFF)
     i: u16,
     /// Program counter (0x000-0xFFF)
@@ -55,7 +35,7 @@ pub struct System {
     key: [bool; 16],
 }
 
-impl Default for System {
+impl Default for Chip8 {
     fn default() -> Self {
         Self {
             i: 0,
@@ -72,7 +52,7 @@ impl Default for System {
     }
 }
 
-impl System {
+impl Chip8 {
     /// Set the state of the system to the intial state
     pub fn reset(&mut self) {
         self.i = 0; // reset index register
@@ -100,6 +80,8 @@ impl System {
         // memory and merge them.
         let pc = self.pc as usize;
         let opcode = (self.mem[pc] as u16) << 8 | self.mem[pc + 1] as u16;
+
+        // Decode and execute opcode
         self.exec(opcode);
 
         // Update timers
@@ -125,7 +107,7 @@ impl System {
 
         let x = opcode_b1 as usize;
         let y = opcode_b2 as usize;
-        let n = (opcode_b3 & 0x000F) as u8;
+        let n = opcode & 0x000F;
         let kk = (opcode & 0x00FF) as u8;
         let nnn = opcode & 0x0FFF;
 
@@ -139,14 +121,14 @@ impl System {
             // The interpreter sets the program counter to the address at the top of the stack, then subtracts 1 from the stack pointer.
             (0x0, 0x0, 0xE, 0xE) => {
                 self.pc = self.stack[self.sp as usize];
-                self.sp = self.sp - 1;
+                self.sp -= 1;
             }
 
             // 0NNN - SYS addr
             // Jump to a machine code routine at nnn.
             // This instruction is only used on the old computers on which Chip-8 was originally implemented.
             // It is ignored by modern interpreters.
-            (0x0, _, _, _) => todo!(),
+            (0x0, _, _, _) => panic!("Not implmented {:X}", opcode),
 
             // 1NNN - JP addr
             // Jump to location nnn.
@@ -283,7 +265,22 @@ impl System {
             // VF is set to 1, otherwise it is set to 0. If the sprite is positioned so part of it is outside the coordinates of the display,
             // it wraps around to the opposite side of the screen. See instruction 8xy3 for more information on XOR, and section 2.4,
             // Display, for more information on the Chip-8 screen and sprites.
-            (0xD, _, _, _) => {}
+            (0xD, _, _, _) => {
+                self.v[0xF] = 0;
+                for (y_offset, sprite) in self.mem[self.i as usize..(self.i + n as u16) as usize]
+                    .iter()
+                    .enumerate()
+                {
+                    for x_offset in 0..8 {
+                        if (sprite & (0x80 >> x_offset)) != 0 {
+                            if self.gfx[x + x_offset + (y + y_offset) * 64] {
+                                self.v[0xF] = 1;
+                            }
+                            self.gfx[x + x_offset + (y + y_offset) * 64] ^= true;
+                        }
+                    }
+                }
+            }
 
             // Ex9E - SKP Vx
             // Skip next instruction if key with the value of Vx is pressed.
@@ -364,10 +361,25 @@ impl System {
     }
 }
 
+/// The first four nibble is used to determine what the character,
+const FONTSET: [u8; 80] = [
+    0xF0, 0x90, 0x90, 0x90, 0xF0, // 0
+    0x20, 0x60, 0x20, 0x20, 0x70, // 1
+    0xF0, 0x10, 0xF0, 0x80, 0xF0, // 2
+    0xF0, 0x10, 0xF0, 0x10, 0xF0, // 3
+    0x90, 0x90, 0xF0, 0x10, 0x10, // 4
+    0xF0, 0x80, 0xF0, 0x10, 0xF0, // 5
+    0xF0, 0x80, 0xF0, 0x90, 0xF0, // 6
+    0xF0, 0x10, 0x20, 0x40, 0x40, // 7
+    0xF0, 0x90, 0xF0, 0x90, 0xF0, // 8
+    0xF0, 0x90, 0xF0, 0x10, 0xF0, // 9
+    0xF0, 0x90, 0xF0, 0x90, 0x90, // A
+    0xE0, 0x90, 0xE0, 0x90, 0xE0, // B
+    0xF0, 0x80, 0x80, 0x80, 0xF0, // C
+    0xE0, 0x90, 0x90, 0x90, 0xE0, // D
+    0xF0, 0x80, 0xF0, 0x80, 0xF0, // E
+    0xF0, 0x80, 0xF0, 0x80, 0x80, // F
+];
+
 #[cfg(test)]
-mod tests {
-    #[test]
-    fn it_works() {
-        assert_eq!(2 + 2, 4);
-    }
-}
+mod tests {}
