@@ -3,10 +3,13 @@
 
 #![deny(missing_docs)]
 
+/// Contains structures for handling program file
+pub mod rom;
+
 use rand::prelude::*;
 
-const CHIP8_WIDTH: usize = 64;
-const CHIP8_HEIGHT: usize = 32;
+const CHIP8_SCREEN_WIDTH: usize = 64;
+const CHIP_SCREEN_HEIGHT: usize = 32;
 
 /// This struct represents the CPU structure of CHIP-8 systems
 pub struct Chip8 {
@@ -33,7 +36,7 @@ pub struct Chip8 {
     /// Graphics system, one instruction is used the draw sprite to the
     /// screen; drawing is done in XOR mode, VF register is set if a
     /// pixel is turned off.
-    gfx: [bool; CHIP8_WIDTH * CHIP8_HEIGHT],
+    gfx: [bool; CHIP8_SCREEN_WIDTH * CHIP_SCREEN_HEIGHT],
     /// Current state of the HEX-based keypad
     key: [bool; 16],
 }
@@ -49,7 +52,7 @@ impl Default for Chip8 {
             v: [0; 16],
             mem: [0; 4096],
             stack: [0; 16],
-            gfx: [false; CHIP8_WIDTH * CHIP8_HEIGHT],
+            gfx: [false; CHIP8_SCREEN_WIDTH * CHIP_SCREEN_HEIGHT],
             key: [false; 16],
         }
     }
@@ -73,20 +76,23 @@ impl Chip8 {
             .enumerate()
             .for_each(|(i, b)| self.mem[i] = *b);
 
-        self.gfx = [false; CHIP8_WIDTH * CHIP8_HEIGHT]; // clear display
+        self.gfx = [false; CHIP8_SCREEN_WIDTH * CHIP_SCREEN_HEIGHT]; // clear display
         self.key = [false; 16]; // clear display
     }
 
+    /// Load the bytes array into memory
+    pub fn load(&mut self, prog_data: &[u8]) {
+        self.mem[0x200..0x200 + prog_data.len()].copy_from_slice(&prog_data[..]);
+    }
+
     /// Run one system clock cycle
-    pub fn cycle(&mut self) {
+    pub fn tick(&mut self) {
         // Fetch opcode at the memory location specified by the program counter
         // The opcode is 2-byte long, so we fetch 2 consecutive bytes from the
         // memory and merge them.
         let pc = self.pc as usize;
         let opcode = (self.mem[pc] as u16) << 8 | self.mem[pc + 1] as u16;
-
-        // Decode and execute opcode
-        self.exec(opcode);
+        self.decode_exec(opcode);
 
         // Update timers
         // The two timers count down to zero if they have been set to a
@@ -94,7 +100,6 @@ impl Chip8 {
         if self.dt > 0 {
             self.dt -= 1;
         }
-
         if self.st > 0 {
             if self.st == 1 {
                 println!("BEEP");
@@ -103,7 +108,8 @@ impl Chip8 {
         }
     }
 
-    fn exec(&mut self, opcode: u16) {
+    fn decode_exec(&mut self, opcode: u16) {
+        println!("Executing opcode {:#04x}", opcode);
         let opcode_n0 = (opcode & 0xF000) >> 12;
         let opcode_n1 = (opcode & 0x0F00) >> 8;
         let opcode_n2 = (opcode & 0x00F0) >> 4;
@@ -271,10 +277,10 @@ impl Chip8 {
                 {
                     for x_offset in 0..8 {
                         if (sprite & (0x80 >> x_offset)) != 0 {
-                            if self.gfx[x + x_offset + (y + y_offset) * CHIP8_WIDTH] {
+                            if self.gfx[x + x_offset + (y + y_offset) * CHIP8_SCREEN_WIDTH] {
                                 self.v[0xF] = 1;
                             }
-                            self.gfx[x + x_offset + (y + y_offset) * CHIP8_WIDTH] ^= true;
+                            self.gfx[x + x_offset + (y + y_offset) * CHIP8_SCREEN_WIDTH] ^= true;
                         }
                     }
                 }
@@ -352,9 +358,7 @@ impl Chip8 {
                 .copy_from_slice(&self.mem[self.i as usize..self.i as usize + x + 1]),
 
             // Unsupported opcode
-            (_, _, _, _) => {
-                todo!()
-            }
+            (_, _, _, _) => panic!("Opcode is not supported {:#04X}", opcode),
         }
     }
 }
