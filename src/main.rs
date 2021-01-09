@@ -12,9 +12,9 @@ fn main() -> GameResult<()> {
     chip8.reset();
     chip8.load(&fpath)?;
 
-    let (mut ctx, mut event_loop) = ContextBuilder::new("CHIP-8", "Tung L. Vo")
+    let (ctx, event_loop) = &mut ContextBuilder::new("CHIP-8", "Tung L. Vo")
         .window_setup(ggez::conf::WindowSetup::default().title("CHIP-8"))
         .window_mode(ggez::conf::WindowMode::default().dimensions(WINDOW_WIDTH, WINDOW_HEIGHT))
         .build()?;
-    event::run(&mut ctx, &mut event_loop, &mut chip8)
+    event::run(ctx, event_loop, &mut chip8)
 }

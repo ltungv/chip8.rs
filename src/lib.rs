@@ -85,19 +85,18 @@ impl EventHandler for Chip8 {
             for y in 0..CHIP8_SCREEN_HEIGHT {
                 for x in 0..CHIP8_SCREEN_WIDTH {
                     if self.gfx[x + y * CHIP8_SCREEN_WIDTH] {
-                        let rect = Rect::new_i32(
-                            x as i32 * PIXEL_SIZE,
-                            y as i32 * PIXEL_SIZE,
-                            PIXEL_SIZE,
-                            PIXEL_SIZE,
-                        );
-                        let rectangle = graphics::Mesh::new_rectangle(
+                        let rect = graphics::Mesh::new_rectangle(
                             ctx,
                             graphics::DrawMode::fill(),
-                            rect,
+                            Rect::new_i32(
+                                x as i32 * PIXEL_SIZE,
+                                y as i32 * PIXEL_SIZE,
+                                PIXEL_SIZE,
+                                PIXEL_SIZE,
+                            ),
                             (1.0, 1.0, 1.0, 1.0).into(),
                         )?;
-                        graphics::draw(ctx, &rectangle, (ggez::mint::Point2 { x: 0.0, y: 0.0 },))?;
+                        graphics::draw(ctx, &rect, (ggez::mint::Point2 { x: 0.0, y: 0.0 },))?;
                     }
                 }
             }
