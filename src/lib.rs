@@ -12,6 +12,7 @@ use ggez::timer;
 use ggez::Context;
 use ggez::GameResult;
 use rand::prelude::*;
+use std::time;
 
 /// Screen width of chip-8
 pub const CHIP8_SCREEN_WIDTH: usize = 64;
@@ -48,6 +49,7 @@ pub struct Chip8 {
     key: [bool; 16],
     /// True of the graphics memory is recently updated
     gfx_updated: bool,
+    timing: time::Instant,
 }
 
 impl Default for Chip8 {
@@ -64,14 +66,15 @@ impl Default for Chip8 {
             gfx: [false; CHIP8_SCREEN_WIDTH * CHIP8_SCREEN_HEIGHT],
             key: [false; 16],
             gfx_updated: false,
+            timing: time::Instant::now(),
         }
     }
 }
 
 impl EventHandler for Chip8 {
     fn update(&mut self, ctx: &mut Context) -> GameResult<()> {
-        const DESIRED_FPS: u32 = 60;
-        while timer::check_update_time(ctx, DESIRED_FPS) {
+        const TICKS_PER_SEC: u32 = 1000;
+        while timer::check_update_time(ctx, TICKS_PER_SEC) {
             self.tick();
         }
         Ok(())
@@ -234,6 +237,7 @@ impl Chip8 {
         self.gfx = [false; CHIP8_SCREEN_WIDTH * CHIP8_SCREEN_HEIGHT]; // clear display
         self.key = [false; 16]; // clear display
         self.gfx_updated = false;
+        self.timing = time::Instant::now();
         // Load font sprites to the first 80 bytes of the memory.
         // The first four nibble is used to determine what the character is
         [
@@ -276,14 +280,17 @@ impl Chip8 {
         // Update timers
         // The two timers count down to zero if they have been set to a
         // value larger than zero (counting at 60Hz).
-        if self.dt > 0 {
-            self.dt -= 1;
-        }
-        if self.st > 0 {
-            if self.st == 1 {
-                println!("BEEP");
+        if self.timing.elapsed() >= time::Duration::from_millis(20) {
+            self.timing = time::Instant::now();
+            if self.dt > 0 {
+                self.dt -= 1;
             }
-            self.st -= 1;
+            if self.st > 0 {
+                if self.st == 1 {
+                    println!("BEEP");
+                }
+                self.st -= 1;
+            }
         }
     }
 
