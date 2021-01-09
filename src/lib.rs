@@ -271,8 +271,7 @@ impl Chip8 {
     fn tick(&mut self) {
         // Get and process the opcode
         let opcode = self.fetch();
-        let inst = Chip8::decode(opcode);
-        self.pc = match self.exec(inst) {
+        self.pc = match self.exec(Inst::from(opcode)) {
             Flow::Halt => self.pc - 2,
             Flow::Next => self.pc,
             Flow::Skip => self.pc + 2,
@@ -296,57 +295,6 @@ impl Chip8 {
         let pc = self.pc as usize;
         self.pc += 2;
         (self.mem[pc] as u16) << 8 | self.mem[pc + 1] as u16
-    }
-
-    fn decode(opcode: u16) -> Inst {
-        let nibbles = (
-            (opcode & 0xF000) >> 12,
-            (opcode & 0x0F00) >> 8,
-            (opcode & 0x00F0) >> 4,
-            (opcode & 0x000F),
-        );
-        let x = nibbles.1 as usize;
-        let y = nibbles.2 as usize;
-        let n = nibbles.3;
-        let kk = (opcode & 0x00FF) as u8;
-        let nnn = opcode & 0x0FFF;
-        match nibbles {
-            (0x0, 0x0, 0xE, 0x0) => Inst::Op00E0,
-            (0x0, 0x0, 0xE, 0xE) => Inst::Op00EE,
-            (0x1, _, _, _) => Inst::Op1NNN(nnn),
-            (0x2, _, _, _) => Inst::Op2NNN(nnn),
-            (0x3, _, _, _) => Inst::Op3XKK(x, kk),
-            (0x4, _, _, _) => Inst::Op4XKK(x, kk),
-            (0x5, _, _, 0x0) => Inst::Op5XY0(x, y),
-            (0x6, _, _, _) => Inst::Op6XKK(x, kk),
-            (0x7, _, _, _) => Inst::Op7XKK(x, kk),
-            (0x8, _, _, 0x0) => Inst::Op8XY0(x, y),
-            (0x8, _, _, 0x1) => Inst::Op8XY1(x, y),
-            (0x8, _, _, 0x2) => Inst::Op8XY2(x, y),
-            (0x8, _, _, 0x3) => Inst::Op8XY3(x, y),
-            (0x8, _, _, 0x4) => Inst::Op8XY4(x, y),
-            (0x8, _, _, 0x5) => Inst::Op8XY5(x, y),
-            (0x8, _, _, 0x6) => Inst::Op8XY6(x, y),
-            (0x8, _, _, 0x7) => Inst::Op8XY7(x, y),
-            (0x8, _, _, 0xE) => Inst::Op8XYE(x, y),
-            (0x9, _, _, 0x0) => Inst::Op9XY0(x, y),
-            (0xA, _, _, _) => Inst::OpANNN(nnn),
-            (0xB, _, _, _) => Inst::OpBNNN(nnn),
-            (0xC, _, _, _) => Inst::OpCXKK(x, kk),
-            (0xD, _, _, _) => Inst::OpDXYN(x, y, n),
-            (0xE, _, 0x9, 0xE) => Inst::OpEX9E(x),
-            (0xE, _, 0xA, 0x1) => Inst::OpEXA1(x),
-            (0xF, _, 0x0, 0x7) => Inst::OpFX07(x),
-            (0xF, _, 0x0, 0xA) => Inst::OpFX0A(x),
-            (0xF, _, 0x1, 0x5) => Inst::OpFX15(x),
-            (0xF, _, 0x1, 0x8) => Inst::OpFX18(x),
-            (0xF, _, 0x1, 0xE) => Inst::OpFX1E(x),
-            (0xF, _, 0x2, 0x9) => Inst::OpFX29(x),
-            (0xF, _, 0x3, 0x3) => Inst::OpFX33(x),
-            (0xF, _, 0x5, 0x5) => Inst::OpFX55(x),
-            (0xF, _, 0x6, 0x5) => Inst::OpFX65(x),
-            (_, _, _, _) => panic!("Opcode is not supported {:#04X}", opcode),
-        }
     }
 
     fn exec(&mut self, inst: Inst) -> Flow {
@@ -638,4 +586,57 @@ enum Inst {
     /// Read registers V0 through Vx from memory starting at location I.
     /// The interpreter reads values from memory starting at location I into registers V0 through Vx.
     OpFX65(usize),
+}
+
+impl From<u16> for Inst {
+    fn from(opcode: u16) -> Self {
+        let nibbles = (
+            (opcode & 0xF000) >> 12,
+            (opcode & 0x0F00) >> 8,
+            (opcode & 0x00F0) >> 4,
+            (opcode & 0x000F),
+        );
+        let x = nibbles.1 as usize;
+        let y = nibbles.2 as usize;
+        let n = nibbles.3;
+        let kk = (opcode & 0x00FF) as u8;
+        let nnn = opcode & 0x0FFF;
+        match nibbles {
+            (0x0, 0x0, 0xE, 0x0) => Self::Op00E0,
+            (0x0, 0x0, 0xE, 0xE) => Self::Op00EE,
+            (0x1, _, _, _) => Self::Op1NNN(nnn),
+            (0x2, _, _, _) => Self::Op2NNN(nnn),
+            (0x3, _, _, _) => Self::Op3XKK(x, kk),
+            (0x4, _, _, _) => Self::Op4XKK(x, kk),
+            (0x5, _, _, 0x0) => Self::Op5XY0(x, y),
+            (0x6, _, _, _) => Self::Op6XKK(x, kk),
+            (0x7, _, _, _) => Self::Op7XKK(x, kk),
+            (0x8, _, _, 0x0) => Self::Op8XY0(x, y),
+            (0x8, _, _, 0x1) => Self::Op8XY1(x, y),
+            (0x8, _, _, 0x2) => Self::Op8XY2(x, y),
+            (0x8, _, _, 0x3) => Self::Op8XY3(x, y),
+            (0x8, _, _, 0x4) => Self::Op8XY4(x, y),
+            (0x8, _, _, 0x5) => Self::Op8XY5(x, y),
+            (0x8, _, _, 0x6) => Self::Op8XY6(x, y),
+            (0x8, _, _, 0x7) => Self::Op8XY7(x, y),
+            (0x8, _, _, 0xE) => Self::Op8XYE(x, y),
+            (0x9, _, _, 0x0) => Self::Op9XY0(x, y),
+            (0xA, _, _, _) => Self::OpANNN(nnn),
+            (0xB, _, _, _) => Self::OpBNNN(nnn),
+            (0xC, _, _, _) => Self::OpCXKK(x, kk),
+            (0xD, _, _, _) => Self::OpDXYN(x, y, n),
+            (0xE, _, 0x9, 0xE) => Self::OpEX9E(x),
+            (0xE, _, 0xA, 0x1) => Self::OpEXA1(x),
+            (0xF, _, 0x0, 0x7) => Self::OpFX07(x),
+            (0xF, _, 0x0, 0xA) => Self::OpFX0A(x),
+            (0xF, _, 0x1, 0x5) => Self::OpFX15(x),
+            (0xF, _, 0x1, 0x8) => Self::OpFX18(x),
+            (0xF, _, 0x1, 0xE) => Self::OpFX1E(x),
+            (0xF, _, 0x2, 0x9) => Self::OpFX29(x),
+            (0xF, _, 0x3, 0x3) => Self::OpFX33(x),
+            (0xF, _, 0x5, 0x5) => Self::OpFX55(x),
+            (0xF, _, 0x6, 0x5) => Self::OpFX65(x),
+            (_, _, _, _) => panic!("Opcode is not supported {:#04X}", opcode),
+        }
+    }
 }
