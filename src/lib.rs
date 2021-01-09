@@ -48,7 +48,7 @@ pub struct Chip8 {
     /// Current state of the HEX-based keypad
     key: [bool; 16],
     /// True of the graphics memory is recently updated
-    can_draw: bool,
+    gfx_updated: bool,
 }
 
 impl Default for Chip8 {
@@ -64,14 +64,14 @@ impl Default for Chip8 {
             stack: [0; 16],
             gfx: [false; CHIP8_SCREEN_WIDTH * CHIP8_SCREEN_HEIGHT],
             key: [false; 16],
-            can_draw: false,
+            gfx_updated: false,
         }
     }
 }
 
 impl EventHandler for Chip8 {
     fn update(&mut self, ctx: &mut Context) -> GameResult<()> {
-        const DESIRED_FPS: u32 = 60 * 2;
+        const DESIRED_FPS: u32 = 60;
         while timer::check_update_time(ctx, DESIRED_FPS) {
             self.tick();
         }
@@ -79,8 +79,8 @@ impl EventHandler for Chip8 {
     }
 
     fn draw(&mut self, ctx: &mut ggez::Context) -> ggez::GameResult {
-        if self.can_draw {
-            self.can_draw = false;
+        if self.gfx_updated {
+            self.gfx_updated = false;
             graphics::clear(ctx, [0.0, 0.0, 0.0, 1.0].into());
             for y in 0..CHIP8_SCREEN_HEIGHT {
                 for x in 0..CHIP8_SCREEN_WIDTH {
@@ -235,7 +235,7 @@ impl Chip8 {
         self.stack = [0; 16];
         self.gfx = [false; CHIP8_SCREEN_WIDTH * CHIP8_SCREEN_HEIGHT]; // clear display
         self.key = [false; 16]; // clear display
-        self.can_draw = false;
+        self.gfx_updated = false;
         // Load font sprites to the first 80 bytes of the memory.
         // The first four nibble is used to determine what the character is
         [
@@ -352,8 +352,8 @@ impl Chip8 {
     fn exec(&mut self, inst: Inst) -> Flow {
         match inst {
             Inst::Op00E0 => {
+                self.gfx_updated = true;
                 self.gfx.iter_mut().for_each(|pixel| *pixel = false);
-                self.can_draw = true;
             }
             Inst::Op00EE => {
                 self.sp -= 1;
@@ -418,6 +418,7 @@ impl Chip8 {
             Inst::OpBNNN(nnn) => return Flow::Jump(self.v[0] as u16 + nnn),
             Inst::OpCXKK(x, kk) => self.v[x] = random::<u8>() & kk,
             Inst::OpDXYN(x, y, n) => {
+                self.gfx_updated = true;
                 self.v[0xF] = 0;
                 for (y_offset, sprite) in self.mem[self.i as usize..(self.i + n) as usize]
                     .iter()
@@ -434,7 +435,6 @@ impl Chip8 {
                         }
                     }
                 }
-                self.can_draw = true;
             }
             Inst::OpEX9E(x) => {
                 if self.key[self.v[x] as usize] {
