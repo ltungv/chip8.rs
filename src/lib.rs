@@ -9,9 +9,9 @@ use ggez::event::KeyMods;
 use ggez::graphics;
 use ggez::graphics::Rect;
 use ggez::timer;
-use ggez::{Context, GameResult};
+use ggez::Context;
+use ggez::GameResult;
 use rand::prelude::*;
-
 use std::io::Read;
 
 /// Screen width of chip-8
@@ -33,7 +33,6 @@ pub struct Chip8 {
     dt: u8,
     /// Sound timer register
     st: u8,
-
     /// Fifteen 8-bit general purpose registers, the 16th register is used as a "carry flag"
     v: [u8; 16],
     /// 4K memory
@@ -42,14 +41,13 @@ pub struct Chip8 {
     mem: [u8; 4096],
     /// Sixteen-level stack
     stack: [u16; 16],
-
     /// Graphics system, one instruction is used the draw sprite to the
     /// screen; drawing is done in XOR mode, VF register is set if a
     /// pixel is turned off.
     gfx: [bool; CHIP8_SCREEN_WIDTH * CHIP8_SCREEN_HEIGHT],
     /// Current state of the HEX-based keypad
     key: [bool; 16],
-
+    /// True of the graphics memory is recently updated
     can_draw: bool,
 }
 
@@ -73,7 +71,7 @@ impl Default for Chip8 {
 
 impl EventHandler for Chip8 {
     fn update(&mut self, ctx: &mut Context) -> GameResult<()> {
-        const DESIRED_FPS: u32 = 60 * 4;
+        const DESIRED_FPS: u32 = 60 * 2;
         while timer::check_update_time(ctx, DESIRED_FPS) {
             self.tick();
         }
@@ -105,7 +103,6 @@ impl EventHandler for Chip8 {
             }
             graphics::present(ctx)?;
         }
-
         timer::yield_now();
         Ok(())
     }
@@ -225,13 +222,6 @@ impl EventHandler for Chip8 {
     }
 }
 
-enum Flow {
-    Halt,
-    Next,
-    Skip,
-    Jump(u16),
-}
-
 impl Chip8 {
     /// Set the state of the system to the intial state
     pub fn reset(&mut self) {
@@ -241,15 +231,11 @@ impl Chip8 {
         self.dt = 0;
         self.st = 0;
         self.v = [0; 16];
-
         self.mem = [0; 4096];
         self.stack = [0; 16];
-
         self.gfx = [false; CHIP8_SCREEN_WIDTH * CHIP8_SCREEN_HEIGHT]; // clear display
         self.key = [false; 16]; // clear display
-
         self.can_draw = false;
-
         // Load font sprites to the first 80 bytes of the memory.
         // The first four nibble is used to determine what the character is
         [
@@ -283,21 +269,15 @@ impl Chip8 {
     }
 
     fn tick(&mut self) {
-        // Fetch opcode at the memory location specified by the program counter
-        // The opcode is 2-byte long, so we fetch 2 consecutive bytes from the
-        // memory and merge them.
-        let pc = self.pc as usize;
-        let opcode = (self.mem[pc] as u16) << 8 | self.mem[pc + 1] as u16;
-
-        // Process the opcode
-        let flow = self.decode_exec(opcode);
-        match flow {
-            Flow::Halt => {}
-            Flow::Next => self.pc += 2,
-            Flow::Skip => self.pc += 4,
-            Flow::Jump(addr) => self.pc = addr,
-        }
-
+        // Get and process the opcode
+        let opcode = self.fetch();
+        let inst = Chip8::decode(opcode);
+        self.pc = match self.exec(inst) {
+            Flow::Halt => self.pc - 2,
+            Flow::Next => self.pc,
+            Flow::Skip => self.pc + 2,
+            Flow::Jump(addr) => addr,
+        };
         // Update timers
         // The two timers count down to zero if they have been set to a
         // value larger than zero (counting at 60Hz).
@@ -312,7 +292,13 @@ impl Chip8 {
         }
     }
 
-    fn decode_exec(&mut self, opcode: u16) -> Flow {
+    fn fetch(&mut self) -> u16 {
+        let pc = self.pc as usize;
+        self.pc += 2;
+        (self.mem[pc] as u16) << 8 | self.mem[pc + 1] as u16
+    }
+
+    fn decode(opcode: u16) -> Inst {
         let nibbles = (
             (opcode & 0xF000) >> 12,
             (opcode & 0x0F00) >> 8,
@@ -324,178 +310,114 @@ impl Chip8 {
         let n = nibbles.3;
         let kk = (opcode & 0x00FF) as u8;
         let nnn = opcode & 0x0FFF;
-
         match nibbles {
-            // 00E0 - CLS
-            // Clear the display.
-            (0x0, 0x0, 0xE, 0x0) => {
+            (0x0, 0x0, 0xE, 0x0) => Inst::Op00E0,
+            (0x0, 0x0, 0xE, 0xE) => Inst::Op00EE,
+            (0x1, _, _, _) => Inst::Op1NNN(nnn),
+            (0x2, _, _, _) => Inst::Op2NNN(nnn),
+            (0x3, _, _, _) => Inst::Op3XKK(x, kk),
+            (0x4, _, _, _) => Inst::Op4XKK(x, kk),
+            (0x5, _, _, 0x0) => Inst::Op5XY0(x, y),
+            (0x6, _, _, _) => Inst::Op6XKK(x, kk),
+            (0x7, _, _, _) => Inst::Op7XKK(x, kk),
+            (0x8, _, _, 0x0) => Inst::Op8XY0(x, y),
+            (0x8, _, _, 0x1) => Inst::Op8XY1(x, y),
+            (0x8, _, _, 0x2) => Inst::Op8XY2(x, y),
+            (0x8, _, _, 0x3) => Inst::Op8XY3(x, y),
+            (0x8, _, _, 0x4) => Inst::Op8XY4(x, y),
+            (0x8, _, _, 0x5) => Inst::Op8XY5(x, y),
+            (0x8, _, _, 0x6) => Inst::Op8XY6(x, y),
+            (0x8, _, _, 0x7) => Inst::Op8XY7(x, y),
+            (0x8, _, _, 0xE) => Inst::Op8XYE(x, y),
+            (0x9, _, _, 0x0) => Inst::Op9XY0(x, y),
+            (0xA, _, _, _) => Inst::OpANNN(nnn),
+            (0xB, _, _, _) => Inst::OpBNNN(nnn),
+            (0xC, _, _, _) => Inst::OpCXKK(x, kk),
+            (0xD, _, _, _) => Inst::OpDXYN(x, y, n),
+            (0xE, _, 0x9, 0xE) => Inst::OpEX9E(x),
+            (0xE, _, 0xA, 0x1) => Inst::OpEXA1(x),
+            (0xF, _, 0x0, 0x7) => Inst::OpFX07(x),
+            (0xF, _, 0x0, 0xA) => Inst::OpFX0A(x),
+            (0xF, _, 0x1, 0x5) => Inst::OpFX15(x),
+            (0xF, _, 0x1, 0x8) => Inst::OpFX18(x),
+            (0xF, _, 0x1, 0xE) => Inst::OpFX1E(x),
+            (0xF, _, 0x2, 0x9) => Inst::OpFX29(x),
+            (0xF, _, 0x3, 0x3) => Inst::OpFX33(x),
+            (0xF, _, 0x5, 0x5) => Inst::OpFX55(x),
+            (0xF, _, 0x6, 0x5) => Inst::OpFX65(x),
+            (_, _, _, _) => panic!("Opcode is not supported {:#04X}", opcode),
+        }
+    }
+
+    fn exec(&mut self, inst: Inst) -> Flow {
+        match inst {
+            Inst::Op00E0 => {
                 self.gfx.iter_mut().for_each(|pixel| *pixel = false);
                 self.can_draw = true;
             }
-
-            // 00EE - RET
-            // Return from a subroutine.
-            // The interpreter sets the program counter to the address at the top of the stack, then subtracts 1 from the stack pointer.
-            (0x0, 0x0, 0xE, 0xE) => {
-                self.pc = self.stack[self.sp as usize];
+            Inst::Op00EE => {
                 self.sp -= 1;
+                return Flow::Jump(self.stack[self.sp as usize]);
             }
-
-            // 1NNN - JP addr
-            // Jump to location nnn.
-            // The interpreter sets the program counter to nnn.
-            (0x1, _, _, _) => return Flow::Jump(nnn),
-
-            // 2NNN - CALL addr
-            // Call subroutine at nnn.
-            // The interpreter increments the stack pointer, then puts the current PC on the top of the stack. The PC is then set to nnn.
-            (0x2, _, _, _) => {
-                self.sp += 1;
+            Inst::Op1NNN(nnn) => return Flow::Jump(nnn),
+            Inst::Op2NNN(nnn) => {
                 self.stack[self.sp as usize] = self.pc;
+                self.sp += 1;
                 return Flow::Jump(nnn);
             }
-
-            // 3XKK - SE Vx, byte
-            // Skip next instruction if Vx = kk.
-            // The interpreter compares register Vx to kk, and if they are equal, increments the program counter by 2.
-            (0x3, _, _, _) => {
+            Inst::Op3XKK(x, kk) => {
                 if self.v[x] == kk {
                     return Flow::Skip;
                 }
             }
-
-            // 4XKK - SNE Vx, byte
-            // Skip next instruction if Vx != kk.
-            // The interpreter compares register Vx to kk, and if they are not equal, increments the program counter by 2.
-            (0x4, _, _, _) => {
+            Inst::Op4XKK(x, kk) => {
                 if self.v[x] != kk {
                     return Flow::Skip;
                 }
             }
-
-            // 5XY0 - SE Vx, Vy
-            // Skip next instruction if Vx = Vy.
-            // The interpreter compares register Vx to register Vy, and if they are equal, increments the program counter by 2.
-            (0x5, _, _, 0x0) => {
+            Inst::Op5XY0(x, y) => {
                 if self.v[x] == self.v[y] {
                     return Flow::Skip;
                 }
             }
-
-            // 6XKK - LD Vx, byte
-            // Set Vx = kk.
-            // The interpreter puts the value kk into register Vx.
-            (0x6, _, _, _) => self.v[x] = kk,
-
-            // 7XKK - ADD Vx, byte
-            // Set Vx = Vx + kk.
-            // Adds the value kk to the value of register Vx, then stores the result in Vx.
-            (0x7, _, _, _) => self.v[x] = self.v[x].wrapping_add(kk),
-
-            // 8XY0 - LD Vx, Vy
-            // Set Vx = Vy.
-            // Stores the value of register Vy in register Vx.
-            (0x8, _, _, 0x0) => self.v[x] = self.v[y],
-
-            // 8XY1 - OR Vx, Vy
-            // Set Vx = Vx OR Vy.
-            // Performs a bitwise OR on the values of Vx and Vy, then stores the result in Vx. A bitwise OR compares the corrseponding bits
-            // from two values, and if either bit is 1, then the same bit in the result is also 1. Otherwise, it is 0.
-            (0x8, _, _, 0x1) => self.v[x] |= self.v[y],
-
-            // 8XY2 - AND Vx, Vy
-            // Set Vx = Vx AND Vy.
-            // Performs a bitwise AND on the values of Vx and Vy, then stores the result in Vx. A bitwise AND compares the corrseponding bits
-            // from two values, and if both bits are 1, then the same bit in the result is also 1. Otherwise, it is 0.
-            (0x8, _, _, 0x2) => self.v[x] &= self.v[y],
-
-            // 8XY3 - XOR Vx, Vy
-            // Set Vx = Vx XOR Vy.
-            // Performs a bitwise exclusive OR on the values of Vx and Vy, then stores the result in Vx. An exclusive OR compares
-            // the corrseponding bits from two values, and if the bits are not both the same, then the corresponding bit in the result
-            // is set to 1. Otherwise, it is 0.
-            (0x8, _, _, 0x3) => self.v[x] ^= self.v[y],
-
-            // 8XY4 - ADD Vx, Vy
-            // Set Vx = Vx + Vy, set VF = carry.
-            // The values of Vx and Vy are added together. If the result is greater than 8 bits (i.e., > 255,) VF is set to 1, otherwise 0.
-            // Only the lowest 8 bits of the result are kept, and stored in Vx.
-            (0x8, _, _, 0x4) => {
+            Inst::Op6XKK(x, kk) => self.v[x] = kk,
+            Inst::Op7XKK(x, kk) => self.v[x] = self.v[x].wrapping_add(kk),
+            Inst::Op8XY0(x, y) => self.v[x] = self.v[y],
+            Inst::Op8XY1(x, y) => self.v[x] |= self.v[y],
+            Inst::Op8XY2(x, y) => self.v[x] &= self.v[y],
+            Inst::Op8XY3(x, y) => self.v[x] ^= self.v[y],
+            Inst::Op8XY4(x, y) => {
                 let (res, overflow) = self.v[x].overflowing_add(self.v[y]);
                 self.v[0xF] = if overflow { 1 } else { 0 };
                 self.v[x] = res;
             }
-
-            // 8XY5 - SUB Vx, Vy
-            // Set Vx = Vx - Vy, set VF = NOT borrow.
-            // If Vx > Vy, then VF is set to 1, otherwise 0. Then Vy is subtracted from Vx, and the results stored in Vx.
-            (0x8, _, _, 0x5) => {
+            Inst::Op8XY5(x, y) => {
                 let (res, overflow) = self.v[x].overflowing_sub(self.v[y]);
                 self.v[0xF] = if overflow { 0 } else { 1 };
                 self.v[x] = res;
             }
-
-            // 8XY6 - SHR Vx {, Vy}
-            // Set Vx = Vx SHR 1.
-            // If the least-significant bit of Vx is 1, then VF is set to 1, otherwise 0. Then Vx is divided by 2.
-            (0x8, _, _, 0x6) => {
+            Inst::Op8XY6(x, _y) => {
                 self.v[0xF] = self.v[x] & 0x01;
                 self.v[x] >>= 1;
             }
-
-            // 8XY7 - SUBN Vx, Vy
-            // Set Vx = Vy - Vx, set VF = NOT borrow.
-            // If Vy > Vx, then VF is set to 1, otherwise 0. Then Vx is subtracted from Vy, and the results stored in Vx.
-            (0x8, _, _, 0x7) => {
+            Inst::Op8XY7(x, y) => {
                 let (res, overflow) = self.v[y].overflowing_sub(self.v[x]);
                 self.v[0xF] = if overflow { 0 } else { 1 };
                 self.v[x] = res;
             }
-
-            // 8XYE - SHL Vx {, Vy}
-            // Set Vx = Vx SHL 1.
-            // If the most-significant bit of Vx is 1, then VF is set to 1, otherwise to 0. Then Vx is multiplied by 2.
-            (0x8, _, _, 0xE) => {
+            Inst::Op8XYE(x, _y) => {
                 self.v[0xF] = (self.v[x] & 0x80) >> 7;
                 self.v[x] <<= 1;
             }
-
-            // 9XY0 - SNE Vx, Vy
-            // Skip next instruction if Vx != Vy.
-            // The values of Vx and Vy are compared, and if they are not equal, the program counter is increased by 2.
-            (0x9, _, _, 0x0) => {
+            Inst::Op9XY0(x, y) => {
                 if self.v[x] != self.v[y] {
                     return Flow::Skip;
                 }
             }
-
-            // ANNN - ld i, addr
-            // set i = nnn.
-            // the value of register i is set to nnn.
-            (0xA, _, _, _) => self.i = nnn,
-
-            // BNNN - JP V0, addr
-            // Jump to location nnn + V0.
-            // The program counter is set to nnn plus the value of V0.
-            (0xB, _, _, _) => {
-                self.pc = self.v[0] as u16 + nnn;
-                return Flow::Jump(nnn);
-            }
-
-            // CXKK - RND Vx, byte
-            // Set Vx = random byte AND kk.
-            // The interpreter generates a random number from 0 to 255, which is then ANDed with the value kk. The results are stored in Vx.
-            // See instruction 8xy2 for more information on AND.
-            (0xC, _, _, _) => self.v[x] = random::<u8>() & kk,
-
-            // Dxyn - DRW Vx, Vy, nibble
-            // Display n-byte sprite starting at memory location I at (Vx, Vy), set VF = collision.
-            // The interpreter reads n bytes from memory, starting at the address stored in I. These bytes are then displayed as sprite
-            // on screen at coordinates (Vx, Vy). Sprites are XORed onto the existing screen. If this causes any pixels to be erased,
-            // VF is set to 1, otherwise it is set to 0. If the sprite is positioned so part of it is outside the coordinates of the display,
-            // it wraps around to the opposite side of the screen. See instruction 8xy3 for more information on XOR, and section 2.4,
-            // Display, for more information on the Chip-8 screen and sprites.
-            (0xD, _, _, _) => {
+            Inst::OpANNN(nnn) => self.i = nnn,
+            Inst::OpBNNN(nnn) => return Flow::Jump(self.v[0] as u16 + nnn),
+            Inst::OpCXKK(x, kk) => self.v[x] = random::<u8>() & kk,
+            Inst::OpDXYN(x, y, n) => {
                 self.v[0xF] = 0;
                 for (y_offset, sprite) in self.mem[self.i as usize..(self.i + n) as usize]
                     .iter()
@@ -514,97 +436,206 @@ impl Chip8 {
                 }
                 self.can_draw = true;
             }
-
-            // Ex9E - SKP Vx
-            // Skip next instruction if key with the value of Vx is pressed.
-            // Checks the keyboard, and if the key corresponding to the value of Vx is currently in the down position, PC is increased by 2.
-            (0xE, _, 0x9, 0xE) => {
+            Inst::OpEX9E(x) => {
                 if self.key[self.v[x] as usize] {
                     return Flow::Skip;
                 }
             }
-
-            // ExA1 - SKNP Vx
-            // Skip next instruction if key with the value of Vx is not pressed.
-            // Checks the keyboard, and if the key corresponding to the value of Vx is currently in the up position, PC is increased by 2.
-            (0xE, _, 0xA, 0x1) => {
+            Inst::OpEXA1(x) => {
                 if !self.key[self.v[x] as usize] {
                     return Flow::Skip;
                 }
             }
-
-            // Fx07 - LD Vx, DT
-            // Set Vx = delay timer value.
-            // The value of DT is placed into Vx.
-            (0xF, _, 0x0, 0x7) => self.v[x] = self.dt,
-
-            // Fx0A - LD Vx, K
-            // Wait for a key press, store the value of the key in Vx.
-            // All execution stops until a key is pressed, then the value of that key is stored in Vx.
-            (0xF, _, 0x0, 0xA) => {
+            Inst::OpFX07(x) => self.v[x] = self.dt,
+            Inst::OpFX0A(x) => {
                 let mut pressed = false;
                 for (key_idx, key_pressed) in self.key.iter().enumerate() {
                     if *key_pressed {
                         self.v[x] = key_idx as u8;
                         pressed = true;
+                        break;
                     }
                 }
                 if !pressed {
                     return Flow::Halt;
                 }
             }
-
-            // Fx15 - LD DT, Vx
-            // Set delay timer = Vx.
-            // DT is set equal to the value of Vx.
-            (0xF, _, 0x1, 0x5) => self.dt = self.v[x],
-
-            // Fx18 - LD ST, Vx
-            // Set sound timer = Vx.
-            // ST is set equal to the value of Vx.
-            (0xF, _, 0x1, 0x8) => self.st = self.v[x],
-
-            // Fx1E - ADD I, Vx
-            // Set I = I + Vx.
-            // The values of I and Vx are added, and the results are stored in I.
-            (0xF, _, 0x1, 0xE) => self.i = self.i.wrapping_add(self.v[x] as u16),
-
-            // Fx29 - LD F, Vx
-            // Set I = location of sprite for digit Vx.
-            // The value of I is set to the location for the hexadecimal sprite corresponding to the value of Vx. See section 2.4, Display,
-            // for more information on the Chip-8 hexadecimal font.
-            (0xF, _, 0x2, 0x9) => self.i = self.v[x] as u16 * 5,
-
-            // Fx33 - LD B, Vx
-            // Store BCD representation of Vx in memory locations I, I+1, and I+2.
-            // The interpreter takes the decimal value of Vx, and places the hundreds digit in memory at location in I, the tens digit
-            // at location I+1, and the ones digit at location I+2.
-            (0xF, _, 0x3, 0x3) => {
+            Inst::OpFX15(x) => self.dt = self.v[x],
+            Inst::OpFX18(x) => self.st = self.v[x],
+            Inst::OpFX1E(x) => self.i = self.i.wrapping_add(self.v[x] as u16),
+            Inst::OpFX29(x) => self.i = self.v[x] as u16 * 5,
+            Inst::OpFX33(x) => {
                 self.mem[self.i as usize] = self.v[x] / 100;
                 self.mem[self.i as usize + 1] = (self.v[x] / 10) % 10;
                 self.mem[self.i as usize + 2] = (self.v[x] % 100) % 10;
             }
-
-            // Fx55 - LD [I], Vx
-            // Store registers V0 through Vx in memory starting at location I.
-            // The interpreter copies the values of registers V0 through Vx into memory, starting at the address in I.
-            (0xF, _, 0x5, 0x5) => {
+            Inst::OpFX55(x) => {
                 self.mem[self.i as usize..=self.i as usize + x].copy_from_slice(&self.v[0..=x]);
                 self.i += x as u16 + 1;
             }
-
-            // Fx65 - LD Vx, [I]
-            // Read registers V0 through Vx from memory starting at location I.
-            // The interpreter reads values from memory starting at location I into registers V0 through Vx.
-            (0xF, _, 0x6, 0x5) => {
+            Inst::OpFX65(x) => {
                 self.v[0..=x].copy_from_slice(&self.mem[self.i as usize..=self.i as usize + x]);
                 self.i += x as u16 + 1;
             }
-
-            // Unsupported opcode
-            (_, _, _, _) => panic!("Opcode is not supported {:#04X}", opcode),
         }
-
         Flow::Next
     }
+}
+
+enum Flow {
+    Halt,
+    Next,
+    Skip,
+    Jump(u16),
+}
+
+#[derive(Debug)]
+enum Inst {
+    /// 00E0 - CLS
+    /// Clear the display.
+    Op00E0,
+    /// 00EE - RET
+    /// Return from a subroutine.
+    /// The interpreter sets the program counter to the address at the top of the stack, then subtracts 1 from the stack pointer.
+    Op00EE,
+    /// 1NNN - JP addr
+    /// Jump to location nnn.
+    /// The interpreter sets the program counter to nnn.
+    Op1NNN(u16),
+    /// 2NNN - CALL addr
+    /// Call subroutine at nnn.
+    /// The interpreter increments the stack pointer, then puts the current PC on the top of the stack. The PC is then set to nnn.
+    Op2NNN(u16),
+    /// 3XKK - SE Vx, byte
+    /// Skip next instruction if Vx = kk.
+    /// The interpreter compares register Vx to kk, and if they are equal, increments the program counter by 2.
+    Op3XKK(usize, u8),
+    /// 4XKK - SNE Vx, byte
+    /// Skip next instruction if Vx != kk.
+    /// The interpreter compares register Vx to kk, and if they are not equal, increments the program counter by 2.
+    Op4XKK(usize, u8),
+    /// 5XY0 - SE Vx, Vy
+    /// Skip next instruction if Vx = Vy.
+    /// The interpreter compares register Vx to register Vy, and if they are equal, increments the program counter by 2.
+    Op5XY0(usize, usize),
+    /// 6XKK - LD Vx, byte
+    /// Set Vx = kk.
+    /// The interpreter puts the value kk into register Vx.
+    Op6XKK(usize, u8),
+    /// 7XKK - ADD Vx, byte
+    /// Set Vx = Vx + kk.
+    /// Adds the value kk to the value of register Vx, then stores the result in Vx.
+    Op7XKK(usize, u8),
+    /// 8XY0 - LD Vx, Vy
+    /// Set Vx = Vy.
+    /// Stores the value of register Vy in register Vx.
+    Op8XY0(usize, usize),
+    /// 8XY1 - OR Vx, Vy
+    /// Set Vx = Vx OR Vy.
+    /// Performs a bitwise OR on the values of Vx and Vy, then stores the result in Vx. A bitwise OR compares the corrseponding bits
+    /// from two values, and if either bit is 1, then the same bit in the result is also 1. Otherwise, it is 0.
+    Op8XY1(usize, usize),
+    /// 8XY2 - AND Vx, Vy
+    /// Set Vx = Vx AND Vy.
+    /// Performs a bitwise AND on the values of Vx and Vy, then stores the result in Vx. A bitwise AND compares the corrseponding bits
+    /// from two values, and if both bits are 1, then the same bit in the result is also 1. Otherwise, it is 0.
+    Op8XY2(usize, usize),
+    /// 8XY3 - XOR Vx, Vy
+    /// Set Vx = Vx XOR Vy.
+    /// Performs a bitwise exclusive OR on the values of Vx and Vy, then stores the result in Vx. An exclusive OR compares
+    /// the corrseponding bits from two values, and if the bits are not both the same, then the corresponding bit in the result
+    /// is set to 1. Otherwise, it is 0.
+    Op8XY3(usize, usize),
+    /// 8XY4 - ADD Vx, Vy
+    /// Set Vx = Vx + Vy, set VF = carry.
+    /// The values of Vx and Vy are added together. If the result is greater than 8 bits (i.e., > 255,) VF is set to 1, otherwise 0.
+    /// Only the lowest 8 bits of the result are kept, and stored in Vx.
+    Op8XY4(usize, usize),
+    /// 8XY5 - SUB Vx, Vy
+    /// Set Vx = Vx - Vy, set VF = NOT borrow.
+    /// If Vx > Vy, then VF is set to 1, otherwise 0. Then Vy is subtracted from Vx, and the results stored in Vx.
+    Op8XY5(usize, usize),
+    /// 8XY6 - SHR Vx {, Vy}
+    /// Set Vx = Vx SHR 1.
+    /// If the least-significant bit of Vx is 1, then VF is set to 1, otherwise 0. Then Vx is divided by 2.
+    Op8XY6(usize, usize),
+    /// 8XY7 - SUBN Vx, Vy
+    /// Set Vx = Vy - Vx, set VF = NOT borrow.
+    /// If Vy > Vx, then VF is set to 1, otherwise 0. Then Vx is subtracted from Vy, and the results stored in Vx.
+    Op8XY7(usize, usize),
+    /// 8XYE - SHL Vx {, Vy}
+    /// Set Vx = Vx SHL 1.
+    /// If the most-significant bit of Vx is 1, then VF is set to 1, otherwise to 0. Then Vx is multiplied by 2.
+    Op8XYE(usize, usize),
+    /// 9XY0 - SNE Vx, Vy
+    /// Skip next instruction if Vx != Vy.
+    /// The values of Vx and Vy are compared, and if they are not equal, the program counter is increased by 2.
+    Op9XY0(usize, usize),
+    /// ANNN - ld i, addr
+    /// set i = nnn.
+    /// the value of register i is set to nnn.
+    OpANNN(u16),
+    /// BNNN - JP V0, addr
+    /// Jump to location nnn + V0.
+    /// The program counter is set to nnn plus the value of V0.
+    OpBNNN(u16),
+    /// CXKK - RND Vx, byte
+    /// Set Vx = random byte AND kk.
+    /// The interpreter generates a random number from 0 to 255, which is then ANDed with the value kk. The results are stored in Vx.
+    /// See instruction 8xy2 for more information on AND.
+    OpCXKK(usize, u8),
+    /// Dxyn - DRW Vx, Vy, nibble
+    /// Display n-byte sprite starting at memory location I at (Vx, Vy), set VF = collision.
+    /// The interpreter reads n bytes from memory, starting at the address stored in I. These bytes are then displayed as sprite
+    /// on screen at coordinates (Vx, Vy). Sprites are XORed onto the existing screen. If this causes any pixels to be erased,
+    /// VF is set to 1, otherwise it is set to 0. If the sprite is positioned so part of it is outside the coordinates of the display,
+    /// it wraps around to the opposite side of the screen. See instruction 8xy3 for more information on XOR, and section 2.4,
+    /// Display, for more information on the Chip-8 screen and sprites.
+    OpDXYN(usize, usize, u16),
+    /// Ex9E - SKP Vx
+    /// Skip next instruction if key with the value of Vx is pressed.
+    /// Checks the keyboard, and if the key corresponding to the value of Vx is currently in the down position, PC is increased by 2.
+    OpEX9E(usize),
+    /// ExA1 - SKNP Vx
+    /// Skip next instruction if key with the value of Vx is not pressed.
+    /// Checks the keyboard, and if the key corresponding to the value of Vx is currently in the up position, PC is increased by 2.
+    OpEXA1(usize),
+    /// Fx07 - LD Vx, DT
+    /// Set Vx = delay timer value.
+    /// The value of DT is placed into Vx.
+    OpFX07(usize),
+    /// Fx0A - LD Vx, K
+    /// Wait for a key press, store the value of the key in Vx.
+    /// All execution stops until a key is pressed, then the value of that key is stored in Vx.
+    OpFX0A(usize),
+    /// Fx15 - LD DT, Vx
+    /// Set delay timer = Vx.
+    /// DT is set equal to the value of Vx.
+    OpFX15(usize),
+    /// Fx18 - LD ST, Vx
+    /// Set sound timer = Vx.
+    /// ST is set equal to the value of Vx.
+    OpFX18(usize),
+    /// Fx1E - ADD I, Vx
+    /// Set I = I + Vx.
+    /// The values of I and Vx are added, and the results are stored in I.
+    OpFX1E(usize),
+    /// Fx29 - LD F, Vx
+    /// Set I = location of sprite for digit Vx.
+    /// The value of I is set to the location for the hexadecimal sprite corresponding to the value of Vx. See section 2.4, Display,
+    /// for more information on the Chip-8 hexadecimal font.
+    OpFX29(usize),
+    /// Fx33 - LD B, Vx
+    /// Store BCD representation of Vx in memory locations I, I+1, and I+2.
+    /// The interpreter takes the decimal value of Vx, and places the hundreds digit in memory at location in I, the tens digit
+    /// at location I+1, and the ones digit at location I+2.
+    OpFX33(usize),
+    /// Fx55 - LD [I], Vx
+    /// Store registers V0 through Vx in memory starting at location I.
+    /// The interpreter copies the values of registers V0 through Vx into memory, starting at the address in I.
+    OpFX55(usize),
+    /// Fx65 - LD Vx, [I]
+    /// Read registers V0 through Vx from memory starting at location I.
+    /// The interpreter reads values from memory starting at location I into registers V0 through Vx.
+    OpFX65(usize),
 }
