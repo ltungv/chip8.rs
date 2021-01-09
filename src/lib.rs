@@ -12,7 +12,6 @@ use ggez::timer;
 use ggez::Context;
 use ggez::GameResult;
 use rand::prelude::*;
-use std::io::Read;
 
 /// Screen width of chip-8
 pub const CHIP8_SCREEN_WIDTH: usize = 64;
@@ -261,10 +260,8 @@ impl Chip8 {
     }
 
     /// Load the bytes from the file at the given path into memory
-    pub fn load(&mut self, fpath: &str) -> std::io::Result<usize> {
-        let mut f = std::fs::File::open(fpath)?;
-        let n = f.read(&mut self.mem[0x200..])?;
-        Ok(n)
+    pub fn load(&mut self, prog_mem: &[u8; 0xDFF], prog_len: usize) {
+        self.mem[0x200..0x200 + prog_len].copy_from_slice(&prog_mem[..prog_len]);
     }
 
     fn tick(&mut self) {
