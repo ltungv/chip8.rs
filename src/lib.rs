@@ -73,7 +73,7 @@ impl Default for Chip8 {
 
 impl EventHandler for Chip8 {
     fn update(&mut self, ctx: &mut Context) -> GameResult<()> {
-        const TICKS_PER_SEC: u32 = 1000;
+        const TICKS_PER_SEC: u32 = 500;
         while timer::check_update_time(ctx, TICKS_PER_SEC) {
             self.tick();
         }
@@ -279,7 +279,7 @@ impl Chip8 {
         };
         // Update timers
         // The two timers count down to zero if they have been set to a
-        // value larger than zero (counting at 60Hz).
+        // value larger than zero (counting at 50Hz).
         if self.timing.elapsed() >= time::Duration::from_millis(20) {
             self.timing = time::Instant::now();
             if self.dt > 0 {
